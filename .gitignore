@@ -1,0 +1,5 @@
+.env
+*.mmdb
+__pycache__/
+*.pyc
+*.log
