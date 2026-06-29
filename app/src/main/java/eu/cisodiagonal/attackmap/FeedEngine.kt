@@ -28,8 +28,10 @@ class FeedEngine(
 ) {
     companion object {
         private const val UA = "attackmap-android/1.0 (+cisodiagonal)"
-        private const val FIRST_BURST = 30
-        private const val EMIT_PER_SEC = 5.0
+        private const val FIRST_BURST = 45
+        private const val EMIT_PER_SEC = 6.0
+        private const val REPLAY_PER_SEC = 1.6   // baseline trickle from pool so map never flatlines
+        private const val POOL_MAX = 6000        // ring of geolocated events available for replay
         private const val DNS_CAP = 0            // host->IP DNS deferred; urlhaus IP rows still used
 
         private val TYPE_COLOR = mapOf(
@@ -55,6 +57,22 @@ class FeedEngine(
                 "bruteforce", 0.6, 30 * 60_000L, "text", "reported attacker"),
             Feed("cins", "https://cinsscore.com/list/ci-badguys.txt",
                 "malware", 0.7, 60 * 60_000L, "text", "CINS bad actor"),
+            // extra blocklists — bigger pool
+            Feed("greensnow", "https://blocklist.greensnow.co/greensnow.txt",
+                "bruteforce", 0.6, 30 * 60_000L, "text", "GreenSnow attacker"),
+            Feed("et-compromised", "https://rules.emergingthreats.net/blockrules/compromised-ips.txt",
+                "intrusion", 0.7, 60 * 60_000L, "text", "ET compromised host"),
+            Feed("blocklist.de-ssh", "https://lists.blocklist.de/lists/ssh.txt",
+                "bruteforce", 0.6, 30 * 60_000L, "text", "SSH brute-forcer"),
+            // DataPlane.org — real sensor/honeypot-derived attacker IPs (no auth)
+            Feed("dataplane-ssh", "https://dataplane.org/sshpwauth.txt",
+                "bruteforce", 0.7, 60 * 60_000L, "dataplane", "honeypot SSH auth"),
+            Feed("dataplane-telnet", "https://dataplane.org/telnetlogin.txt",
+                "bruteforce", 0.7, 60 * 60_000L, "dataplane", "honeypot telnet (IoT)"),
+            Feed("dataplane-vnc", "https://dataplane.org/vncrfb.txt",
+                "intrusion", 0.7, 60 * 60_000L, "dataplane", "honeypot VNC probe"),
+            Feed("dataplane-sip", "https://dataplane.org/sipquery.txt",
+                "recon", 0.6, 60 * 60_000L, "dataplane", "honeypot SIP scan"),
         )
     }
 
@@ -66,6 +84,9 @@ class FeedEngine(
     private val emitQ = LinkedBlockingQueue<JSONObject>(4000)
     private val geoCache = ConcurrentHashMap<String, DoubleArray>()    // ip -> [lat,lon, synthetic?1:0]
     private val geoCountry = ConcurrentHashMap<String, String>()
+    private val pool = ArrayList<JSONObject>()                         // geolocated events for replay trickle
+    private val poolLock = Any()
+    private val rng = java.util.Random()
     @Volatile private var running = false
     private val ipRegex = Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$""")
 
@@ -73,6 +94,7 @@ class FeedEngine(
         if (running) return
         running = true
         Thread({ emitter() }, "emitter").apply { isDaemon = true }.start()
+        Thread({ replay() }, "replay").apply { isDaemon = true }.start()
         for (f in FEEDS) {
             Thread({ pollLoop(f) }, "poll-${f.name}").apply { isDaemon = true }.start()
         }
@@ -89,6 +111,27 @@ class FeedEngine(
             onEvent(ev)
             try { Thread.sleep(gapMs) } catch (e: InterruptedException) { break }
         }
+    }
+
+    // ----- replay: re-emit known-bad infra from the pool at a steady baseline
+    // so the map never goes dead between (slow) feed refreshes. Honest: these
+    // are the same real malicious IPs already shown, redrawn.
+    private fun replay() {
+        val gapMs = (1000.0 / REPLAY_PER_SEC).toLong()
+        while (running) {
+            sleepMs(gapMs)
+            val src = synchronized(poolLock) {
+                if (pool.isEmpty()) null else pool[rng.nextInt(pool.size)]
+            } ?: continue
+            val ev = try { JSONObject(src.toString()) } catch (e: Exception) { continue }
+            ev.put("replay", true)
+            try { emitQ.offer(ev) } catch (e: Exception) {}
+        }
+    }
+
+    private fun poolAdd(ev: JSONObject) = synchronized(poolLock) {
+        pool.add(ev)
+        if (pool.size > POOL_MAX) pool.subList(0, pool.size - POOL_MAX).clear()
     }
 
     // ----- one feed poller ----------------------------------------------------
@@ -137,6 +180,7 @@ class FeedEngine(
                 put("weight", r.weight)
                 put("synthetic", loc[2] > 0.5)
             }
+            poolAdd(JSONObject(ev.toString()))
             try { emitQ.offer(ev) } catch (e: Exception) {}
         }
     }
@@ -174,7 +218,23 @@ class FeedEngine(
         "feodo" -> parseFeodo(httpGet(f.url), f)
         "urlhaus" -> parseUrlhaus(httpGet(f.url), f)
         "dshield" -> parseDshield(httpGet(f.url), f)
+        "dataplane" -> parseDataplane(httpGet(f.url), f)
         else -> parseText(httpGet(f.url), f)
+    }
+
+    // DataPlane.org feeds: pipe-delimited  ASN | ASname | IP | lastseen | category
+    private fun parseDataplane(txt: String, f: Feed): List<Raw> {
+        val out = ArrayList<Raw>()
+        for (line in txt.lineSequence()) {
+            val t = line.trim()
+            if (t.isEmpty() || t.startsWith("#")) continue
+            val cols = t.split('|')
+            if (cols.size < 3) continue
+            val ip = cols[2].trim()
+            if (!isIp(ip)) continue
+            out.add(Raw(ip, f.type, f.name, f.label, null, f.weight))
+        }
+        return out
     }
 
     private fun parseFeodo(txt: String, f: Feed): List<Raw> {
