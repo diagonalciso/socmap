@@ -41,6 +41,12 @@ html,body{height:100%;overflow:hidden;background:#05080f;color:var(--text);
   background:rgba(13,17,23,.7);border:1px solid var(--border);border-radius:8px;padding:4px 8px;max-width:300px;}
 #status{position:fixed;left:50%;top:46%;transform:translate(-50%,-50%);z-index:25;color:var(--muted);
   font-size:13px;text-align:center;}
+#sound{position:fixed;top:10px;right:10px;z-index:30;width:40px;height:40px;border-radius:50%;
+  background:rgba(13,17,23,.85);border:1px solid var(--border);color:var(--muted);font-size:18px;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;}
+#sound.on{color:var(--accent);border-color:var(--accent);}
+#sound.hint{animation:sh 1.3s ease-in-out infinite;border-color:var(--accent);color:var(--accent);}
+@keyframes sh{0%,100%{box-shadow:0 0 0 0 rgba(88,166,255,.55);}50%{box-shadow:0 0 0 9px rgba(88,166,255,0);}}
 </style></head><body>
 <canvas id="map"></canvas>
 <div id="title"><span class="live-dot"></span>ATTACK MAP <span style="color:var(--muted);font-weight:500;font-size:10px">live feeds</span></div>
@@ -52,6 +58,7 @@ html,body{height:100%;overflow:hidden;background:#05080f;color:var(--text);
   <div class="sec"><h3>By Type</h3><div id="types"></div></div>
 </div>
 <div class="panel" id="ticker"><h3>Latest</h3><div id="ticks"></div></div>
+<div id="sound" class="hint" title="sound on/off">🔇</div>
 <div id="legend"></div>
 <div id="note">Malicious IPs from public threat feeds, geolocated to an approximate origin. Known-bad infrastructure, not live victim attribution.</div>
 <div id="status">starting feeds…</div>
@@ -99,7 +106,8 @@ function addEvent(ev){counts.total++;
   const ctrl=[(x0+x1)/2,(y0+y1)/2-lift],col=ev.color||TYPES[t]||TYPES.other;
   const w=ev.weight!==undefined?ev.weight:0.6;
   arcs.push({x0,y0,x1,y1,cx:ctrl[0],cy:ctrl[1],col,w,t:0,dur:900+dist*0.6,syn:ev.synthetic});
-  dots.push({x:x0,y:y0,col,t:0,syn:ev.synthetic,w});addTick(ev);}
+  dots.push({x:x0,y:y0,col,t:0,syn:ev.synthetic,w});addTick(ev);
+  try{Sound.zap(ev);}catch(e){}}
 function addTick(ev){const box=document.getElementById('ticks');const d=document.createElement('div');
   d.className='tick'+(ev.synthetic?' syn':'');
   d.innerHTML='<span class="ip">'+esc(ev.ip)+'</span><span class="cn">'+esc(ev.country||'')+(ev.synthetic?' ~':'')+
@@ -157,6 +165,61 @@ function wireControls(){
     if(e.touches.length===1){const t=e.touches[0];view.panX+=t.clientX-tlx;view.panY+=t.clientY-tly;tlx=t.clientX;tly=t.clientY;clampPan();}
     else if(e.touches.length===2){const a=e.touches[0],b=e.touches[1];const nd=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
       const r=rect(),mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;if(pdist>0)zoomAt(mx,my,nd/pdist);pdist=nd;}},{passive:false});}
+
+// ---- audio: synthesized ambient drone + per-attack zaps (Web Audio) ------
+const Sound=(function(){
+  let ctx,master,padGain,enabled=false;
+  // base pitch per attack type (Hz) — low = heavy, high = recon/scan
+  const TYPE_F={ddos:70,ransomware:90,malware:165,bruteforce:240,webattack:330,intrusion:200,recon:540,other:300};
+  let bucket=5,lastT=performance.now();          // token bucket: ~5 audible zaps/sec
+  function init(){
+    const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return false;
+    ctx=new AC();
+    master=ctx.createGain();master.gain.value=0;master.connect(ctx.destination);
+    // ambient pad: detuned low oscillators through a slowly sweeping lowpass
+    padGain=ctx.createGain();padGain.gain.value=0.05;
+    const filt=ctx.createBiquadFilter();filt.type='lowpass';filt.frequency.value=360;filt.Q.value=7;
+    padGain.connect(filt);filt.connect(master);
+    [55,82.5,110].forEach(function(f,i){
+      const o=ctx.createOscillator();o.type=(i===2)?'triangle':'sawtooth';
+      o.frequency.value=f;o.detune.value=(i-1)*7;
+      const g=ctx.createGain();g.gain.value=(i===2)?0.22:0.45;
+      o.connect(g);g.connect(padGain);o.start();});
+    const lfo=ctx.createOscillator();lfo.frequency.value=0.05;
+    const lg=ctx.createGain();lg.gain.value=190;lfo.connect(lg);lg.connect(filt.frequency);lfo.start();
+    return true;
+  }
+  function enable(){if(!ctx&&!init())return;if(ctx.state==='suspended')ctx.resume();
+    enabled=true;master.gain.cancelScheduledValues(ctx.currentTime);
+    master.gain.linearRampToValueAtTime(0.85,ctx.currentTime+0.8);}
+  function disable(){if(!ctx)return;enabled=false;
+    master.gain.cancelScheduledValues(ctx.currentTime);
+    master.gain.linearRampToValueAtTime(0,ctx.currentTime+0.3);}
+  function zap(ev){
+    if(!enabled||!ctx)return;
+    const now=performance.now();bucket=Math.min(5,bucket+(now-lastT)/1000*5);lastT=now;
+    if(bucket<1)return;bucket-=1;
+    const rep=!!ev.replay;if(rep&&Math.random()<0.55)return;   // thin out replay clutter
+    const t0=ctx.currentTime,f0=TYPE_F[ev.type]||300;
+    const o=ctx.createOscillator();o.type='sine';
+    o.frequency.setValueAtTime(f0*3,t0);o.frequency.exponentialRampToValueAtTime(f0,t0+0.17);
+    const w=(ev.weight!==undefined)?ev.weight:0.6,vol=(rep?0.10:0.26)*(0.5+0.5*w);
+    const g=ctx.createGain();
+    g.gain.setValueAtTime(0.0001,t0);g.gain.exponentialRampToValueAtTime(vol,t0+0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+0.22);
+    o.connect(g);
+    const lon=(ev.src&&ev.src.lon)||0;
+    if(ctx.createStereoPanner){const p=ctx.createStereoPanner();
+      p.pan.value=Math.max(-1,Math.min(1,lon/180));g.connect(p);p.connect(master);}
+    else g.connect(master);
+    o.start(t0);o.stop(t0+0.24);
+  }
+  return {enable:enable,disable:disable,zap:zap,isOn:function(){return enabled;}};
+})();
+(function(){const b=document.getElementById('sound');if(!b)return;
+  b.addEventListener('click',function(){b.classList.remove('hint');
+    if(Sound.isOn()){Sound.disable();b.textContent='🔇';b.classList.remove('on');}
+    else{Sound.enable();b.textContent='🔊';b.classList.add('on');}});})();
 
 // ---- native bridge (called by the Kotlin side via evaluateJavascript) ----
 window.setWorld=function(geojson){try{world=(typeof geojson==='string')?JSON.parse(geojson):geojson;drawBase();}catch(e){}};

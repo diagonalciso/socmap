@@ -26,6 +26,7 @@ class MainActivity : AppCompatActivity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
+            settings.mediaPlaybackRequiresUserGesture = false   // let Web Audio start (still gated by the in-page tap)
             setBackgroundColor(0xFF05080F.toInt())
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
