@@ -44,7 +44,7 @@ dshield (SANS top attackers) · blocklist.de · CINS Army. Geolocation: **ipwho.
 
 ```bash
 cd ~/socmap-android
-ANDROID_HOME=/home/user/android-sdk JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
+ANDROID_HOME=$HOME/android-sdk JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
   ./gradlew :app:assembleDebug
 # -> app/build/outputs/apk/debug/app-debug.apk   (~3.4 MB, universal)
 ```
