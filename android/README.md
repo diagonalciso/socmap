@@ -5,8 +5,8 @@ A self-contained Norse-style live attack map for Android tablets/phones. Polls
 and animates the hits as glowing arcs on a canvas world map. No backend, no login,
 no API keys.
 
-Companion to the desktop `~/socmap` server — same feeds, same look, but the
-whole pipeline runs on-device.
+The Android half of the [socmap](../) monorepo — companion to the desktop server
+at the repo root. Same feeds, same look, but the whole pipeline runs on-device.
 
 ## What it shows
 
@@ -43,7 +43,7 @@ dshield (SANS top attackers) · blocklist.de · CINS Army. Geolocation: **ipwho.
 ## Build
 
 ```bash
-cd ~/socmap-android
+cd android          # from the repo root
 ANDROID_HOME=$HOME/android-sdk JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
   ./gradlew :app:assembleDebug
 # -> app/build/outputs/apk/debug/app-debug.apk   (~3.4 MB, universal)

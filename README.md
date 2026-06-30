@@ -24,6 +24,7 @@ Download from the [latest release](../../releases/latest):
 |----------|------|
 | Windows  | `socmap-windows-x64.exe` |
 | Linux    | `socmap-linux-x64` |
+| Android  | `socmap-android.apk` (sideload — *Settings → allow unknown sources*) |
 
 **Windows:** double-click `socmap-windows-x64.exe` (SmartScreen may warn on an
 unsigned binary → *More info → Run anyway*). A console window opens; browse to
@@ -147,12 +148,24 @@ workflow (`.github/workflows/release.yml`) builds **both** Linux and Windows
 binaries on their native runners and attaches them to a release:
 
 ```bash
-git tag v0.1 && git push origin v0.1     # -> CI builds + publishes both binaries
+git tag v0.1 && git push origin v0.1     # -> CI builds + publishes Linux + Windows + Android
 ```
 
 ---
 
-## See also
+## Android
 
-Companion **standalone Android app** (on-device feeds + WebView map + the same
-audio): [`socmap-android`](https://github.com/diagonalciso/socmap-android).
+This repo is a **monorepo**: the desktop server lives at the root, and a
+**standalone Android app** lives in [`android/`](android/) — on-device feeds +
+WebView map + the same synthesized audio, no server needed. It is a self-contained
+Gradle project (`eu.cisodiagonal.socmap`).
+
+```bash
+cd android
+ANDROID_HOME=$HOME/android-sdk JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
+  ./gradlew :app:assembleDebug
+# -> android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+The release workflow also builds the debug APK and attaches `socmap-android.apk`
+to the same release as the desktop binaries. See [`android/README.md`](android/README.md).
