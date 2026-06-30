@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>SOCmap</title>
+<style>
+:root{--border:#222c38;--muted:#7d8590;--text:#c9d1d9;--accent:#58a6ff;--surface2:#161b22;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;background:#05080f;color:var(--text);
+  font-family:-apple-system,Roboto,Helvetica,Arial,sans-serif;}
+#map{position:fixed;inset:0;width:100vw;height:100vh;display:block;z-index:1;}
+.panel{position:fixed;z-index:20;background:rgba(13,17,23,.8);border:1px solid var(--border);
+  border-radius:10px;padding:10px 12px;font-size:12px;}
+#title{top:10px;left:12px;font-weight:800;font-size:14px;letter-spacing:.4px;color:#fff;
+  display:flex;align-items:center;gap:8px;z-index:21;}
+.live-dot{width:8px;height:8px;border-radius:50%;background:#3fb950;display:inline-block;
+  animation:lp 1.4s ease-in-out infinite;}
+@keyframes lp{0%,100%{opacity:1;}50%{opacity:.25;}}
+#stats{top:46px;left:12px;width:188px;}
+#ticker{right:10px;top:46px;width:250px;max-height:calc(100vh - 70px);overflow:hidden;}
+.panel h3{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
+  margin-bottom:6px;font-weight:700;}
+.big{font-size:26px;font-weight:800;color:#fff;line-height:1;}
+.big small{font-size:10px;color:var(--muted);font-weight:500;}
+.row{display:flex;align-items:center;gap:7px;padding:2px 0;}
+.row .lbl{flex:1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.row .ct{font-weight:700;color:#fff;}
+.swatch{width:9px;height:9px;border-radius:2px;flex-shrink:0;}
+.sec{margin-top:9px;}
+.tick{display:flex;gap:7px;align-items:baseline;padding:3px 0;border-top:1px solid rgba(48,54,61,.5);
+  font-size:11px;animation:fadein .4s;}
+.tick .ip{font-family:monospace;color:#fff;}
+.tick .cn{color:var(--muted);}
+.tick .sr{font-size:9px;color:var(--muted);}
+.tick .ty{font-weight:700;margin-left:auto;}
+.tick.syn{opacity:.55;}
+@keyframes fadein{from{opacity:0;transform:translateX(8px);}to{opacity:1;}}
+#legend{position:fixed;bottom:10px;left:12px;z-index:20;display:flex;gap:9px;flex-wrap:wrap;
+  background:rgba(13,17,23,.7);border:1px solid var(--border);border-radius:8px;padding:5px 9px;font-size:10px;}
+.lg{display:flex;align-items:center;gap:4px;color:var(--muted);}
+#note{position:fixed;bottom:10px;right:10px;z-index:20;font-size:9px;color:var(--muted);
+  background:rgba(13,17,23,.7);border:1px solid var(--border);border-radius:8px;padding:4px 8px;max-width:300px;}
+#status{position:fixed;left:50%;top:46%;transform:translate(-50%,-50%);z-index:25;color:var(--muted);
+  font-size:13px;text-align:center;}
+#sound{position:fixed;top:10px;right:10px;z-index:30;width:40px;height:40px;border-radius:50%;
+  background:rgba(13,17,23,.85);border:1px solid var(--border);color:var(--muted);font-size:18px;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;}
+#sound.on{color:var(--accent);border-color:var(--accent);}
+#sound.hint{animation:sh 1.3s ease-in-out infinite;border-color:var(--accent);color:var(--accent);}
+@keyframes sh{0%,100%{box-shadow:0 0 0 0 rgba(88,166,255,.55);}50%{box-shadow:0 0 0 9px rgba(88,166,255,0);}}
+</style></head><body>
+<canvas id="map"></canvas>
+<div id="title"><span class="live-dot"></span>SOCMAP <span style="color:var(--muted);font-weight:500;font-size:10px">live feeds</span></div>
+<div class="panel" id="stats">
+  <div class="big"><span id="total">0</span> <small>events</small></div>
+  <div class="big" style="font-size:15px;margin-top:5px;"><span id="rate">0</span> <small>/min</small></div>
+  <div class="sec"><h3>Top Origins</h3><div id="origins"></div></div>
+  <div class="sec"><h3>By Source</h3><div id="srcs"></div></div>
+  <div class="sec"><h3>By Type</h3><div id="types"></div></div>
+</div>
+<div class="panel" id="ticker"><h3>Latest</h3><div id="ticks"></div></div>
+<div id="sound" class="hint" title="sound on/off">🔇</div>
+<div id="legend"></div>
+<div id="note">Malicious IPs from public threat feeds, geolocated to an approximate origin. Known-bad infrastructure, not live victim attribution.</div>
+<div id="status">starting feeds…</div>
+<script>
+const TYPES={ddos:'#ff3860',ransomware:'#ff4444',malware:'#ff8c00',bruteforce:'#ffd166',
+  webattack:'#06d6a0',intrusion:'#bc8cff',recon:'#58a6ff',other:'#8b949e'};
+const cv=document.getElementById('map'),ctx=cv.getContext('2d');
+let W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+let base=null,world=null,HOME={lat:52.37,lon:4.90};
+const arcs=[],pings=[],dots=[];
+const counts={total:0,origins:{},types:{},srcs:{}};
+const recentTimes=[];
+function proj(lat,lon){return [(lon+180)/360*W,(90-lat)/180*H];}
+const view={zoom:1,panX:0,panY:0};
+function tx(x){return view.panX+x*view.zoom;} function ty(y){return view.panY+y*view.zoom;}
+const ZMIN=0.35,ZMAX=8;
+function clampPan(){const wW=W*view.zoom,wH=H*view.zoom;
+  view.panX=wW>=W?Math.min(0,Math.max(W-wW,view.panX)):(W-wW)/2;
+  view.panY=wH>=H?Math.min(0,Math.max(H-wH,view.panY)):(H-wH)/2;}
+function zoomAt(sx,sy,f){const nz=Math.min(ZMAX,Math.max(ZMIN,view.zoom*f));if(nz===view.zoom)return;
+  const wx=(sx-view.panX)/view.zoom,wy=(sy-view.panY)/view.zoom;
+  view.zoom=nz;view.panX=sx-wx*nz;view.panY=sy-wy*nz;clampPan();}
+function resize(){W=window.innerWidth;H=window.innerHeight;
+  cv.width=W*DPR;cv.height=H*DPR;cv.style.width=W+'px';cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);drawBase();}
+window.addEventListener('resize',resize);
+function drawBase(){base=document.createElement('canvas');base.width=W;base.height=H;
+  const b=base.getContext('2d');b.fillStyle='#05080f';b.fillRect(0,0,W,H);
+  b.strokeStyle='rgba(40,60,90,.25)';b.lineWidth=1;
+  for(let lon=-180;lon<=180;lon+=30){const[x]=proj(0,lon);b.beginPath();b.moveTo(x,0);b.lineTo(x,H);b.stroke();}
+  for(let lat=-60;lat<=60;lat+=30){const[,y]=proj(lat,0);b.beginPath();b.moveTo(0,y);b.lineTo(W,y);b.stroke();}
+  if(world){b.lineWidth=0.7;for(const f of world.features){const g=f.geometry;if(!g)continue;
+    const polys=g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:[];
+    for(const poly of polys)for(const ring of poly){b.beginPath();
+      for(let i=0;i<ring.length;i++){const[x,y]=proj(ring[i][1],ring[i][0]);i===0?b.moveTo(x,y):b.lineTo(x,y);}
+      b.closePath();b.fillStyle='rgba(28,42,64,.55)';b.fill();b.strokeStyle='rgba(70,100,140,.45)';b.stroke();}}}
+  const[hx,hy]=proj(HOME.lat,HOME.lon);b.fillStyle='#58a6ff';b.beginPath();b.arc(hx,hy,3,0,7);b.fill();}
+function addEvent(ev){counts.total++;
+  const t=ev.type||'other';counts.types[t]=(counts.types[t]||0)+1;
+  const cn=ev.country||'?';counts.origins[cn]=(counts.origins[cn]||0)+1;
+  const sr=ev.source||'?';counts.srcs[sr]=(counts.srcs[sr]||0)+1;
+  recentTimes.push(Date.now());
+  const[x0,y0]=proj(ev.src.lat,ev.src.lon),[x1,y1]=proj(HOME.lat,HOME.lon);
+  const dist=Math.hypot(x1-x0,y1-y0),lift=Math.min(dist*0.3,220);
+  const ctrl=[(x0+x1)/2,(y0+y1)/2-lift],col=ev.color||TYPES[t]||TYPES.other;
+  const w=ev.weight!==undefined?ev.weight:0.6;
+  arcs.push({x0,y0,x1,y1,cx:ctrl[0],cy:ctrl[1],col,w,t:0,dur:900+dist*0.6,syn:ev.synthetic});
+  dots.push({x:x0,y:y0,col,t:0,syn:ev.synthetic,w});addTick(ev);
+  try{Sound.zap(ev);}catch(e){}}
+function addTick(ev){const box=document.getElementById('ticks');const d=document.createElement('div');
+  d.className='tick'+(ev.synthetic?' syn':'');
+  d.innerHTML='<span class="ip">'+esc(ev.ip)+'</span><span class="cn">'+esc(ev.country||'')+(ev.synthetic?' ~':'')+
+    '</span><span class="sr">'+esc(ev.source||'')+'</span><span class="ty" style="color:'+(ev.color||'#888')+'">'+esc(ev.type||'')+'</span>';
+  box.insertBefore(d,box.firstChild);while(box.children.length>12)box.removeChild(box.lastChild);}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function rows(obj,colorMap){return Object.entries(obj).sort((a,b)=>b[1]-a[1]).slice(0,6).map(function(e){
+  const sw=colorMap?'<span class="swatch" style="background:'+(colorMap[e[0]]||'#888')+'"></span>':'';
+  return '<div class="row">'+sw+'<span class="lbl">'+esc(e[0])+'</span><span class="ct">'+e[1]+'</span></div>';
+}).join('')||'<div class="row" style="color:var(--muted)">—</div>';}
+function renderPanels(){document.getElementById('total').textContent=counts.total;
+  const cut=Date.now()-60000;while(recentTimes.length&&recentTimes[0]<cut)recentTimes.shift();
+  document.getElementById('rate').textContent=recentTimes.length;
+  document.getElementById('origins').innerHTML=rows(counts.origins,null);
+  document.getElementById('srcs').innerHTML=rows(counts.srcs,null);
+  document.getElementById('types').innerHTML=rows(counts.types,TYPES);}
+setInterval(renderPanels,1000);
+function loop(){ctx.clearRect(0,0,W,H);
+  if(base)ctx.drawImage(base,view.panX,view.panY,W*view.zoom,H*view.zoom);
+  ctx.globalCompositeOperation='lighter';
+  for(let i=arcs.length-1;i>=0;i--){const a=arcs[i];a.t+=16/a.dur;const p=Math.min(a.t,1);
+    ctx.beginPath();const steps=Math.ceil(28*p)+1;
+    for(let s=0;s<=steps;s++){const u=(s/steps)*p,iu=1-u;
+      const x=iu*iu*a.x0+2*iu*u*a.cx+u*u*a.x1,y=iu*iu*a.y0+2*iu*u*a.cy+u*u*a.y1;
+      s===0?ctx.moveTo(tx(x),ty(y)):ctx.lineTo(tx(x),ty(y));}
+    const w=a.w!==undefined?a.w:0.6;
+    ctx.strokeStyle=a.col;ctx.globalAlpha=(a.syn?0.5:1)*w*(1-Math.max(0,a.t-1)*2);
+    ctx.lineWidth=(0.7+1.6*w)*(a.syn?0.8:1);ctx.shadowBlur=4+10*w;ctx.shadowColor=a.col;ctx.stroke();ctx.shadowBlur=0;
+    const iu=1-p,hx=iu*iu*a.x0+2*iu*p*a.cx+p*p*a.x1,hy=iu*iu*a.y0+2*iu*p*a.cy+p*p*a.y1;
+    if(p<1){ctx.globalAlpha=(a.syn?0.6:1)*w;ctx.fillStyle=a.col;ctx.beginPath();ctx.arc(tx(hx),ty(hy),1.2+2*w,0,7);ctx.fill();}
+    if(a.t>=1&&!a.hit){a.hit=true;if(w>=0.7)pings.push({x:a.x1,y:a.y1,t:0,col:a.col});}
+    if(a.t>1.5)arcs.splice(i,1);}
+  for(let i=pings.length-1;i>=0;i--){const p=pings[i];p.t+=0.03;
+    ctx.globalAlpha=Math.max(0,1-p.t);ctx.strokeStyle=p.col;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(tx(p.x),ty(p.y),p.t*26*view.zoom,0,7);ctx.stroke();if(p.t>=1)pings.splice(i,1);}
+  for(let i=dots.length-1;i>=0;i--){const d=dots[i];d.t+=0.012;const dw=d.w!==undefined?d.w:0.6;
+    ctx.globalAlpha=Math.max(0,(d.syn?0.5:0.9)*(0.4+0.6*dw)-d.t);ctx.fillStyle=d.col;
+    ctx.beginPath();ctx.arc(tx(d.x),ty(d.y),1.6+2*dw+d.t*2,0,7);ctx.fill();if(d.t>=1)dots.splice(i,1);}
+  ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+  if(arcs.length>240)arcs.splice(0,arcs.length-240);
+  if(dots.length>400)dots.splice(0,dots.length-400);
+  requestAnimationFrame(loop);}
+function buildLegend(){document.getElementById('legend').innerHTML=Object.keys(TYPES).map(function(k){
+  return '<span class="lg"><span class="swatch" style="background:'+TYPES[k]+'"></span>'+k+'</span>';}).join('');}
+function wireControls(){
+  cv.addEventListener('wheel',function(e){e.preventDefault();zoomAt(e.offsetX,e.offsetY,e.deltaY<0?1.15:1/1.15);},{passive:false});
+  let drag=false,lx=0,ly=0;
+  cv.addEventListener('mousedown',function(e){drag=true;lx=e.clientX;ly=e.clientY;});
+  window.addEventListener('mouseup',function(){drag=false;});
+  window.addEventListener('mousemove',function(e){if(!drag)return;view.panX+=e.clientX-lx;view.panY+=e.clientY-ly;lx=e.clientX;ly=e.clientY;clampPan();});
+  let pdist=0,tlx=0,tly=0;const rect=()=>cv.getBoundingClientRect();
+  cv.addEventListener('touchstart',function(e){if(e.touches.length===1){tlx=e.touches[0].clientX;tly=e.touches[0].clientY;}
+    else if(e.touches.length===2){const a=e.touches[0],b=e.touches[1];pdist=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);}},{passive:false});
+  cv.addEventListener('touchmove',function(e){e.preventDefault();
+    if(e.touches.length===1){const t=e.touches[0];view.panX+=t.clientX-tlx;view.panY+=t.clientY-tly;tlx=t.clientX;tly=t.clientY;clampPan();}
+    else if(e.touches.length===2){const a=e.touches[0],b=e.touches[1];const nd=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+      const r=rect(),mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;if(pdist>0)zoomAt(mx,my,nd/pdist);pdist=nd;}},{passive:false});}
+
+// ---- audio: synthesized ambient drone + per-attack zaps (Web Audio) ------
+const Sound=(function(){
+  let ctx,master,padGain,enabled=false;
+  // base pitch per attack type (Hz) — low = heavy, high = recon/scan
+  const TYPE_F={ddos:70,ransomware:90,malware:165,bruteforce:240,webattack:330,intrusion:200,recon:540,other:300};
+  let bucket=5,lastT=performance.now();          // token bucket: ~5 audible zaps/sec
+  function init(){
+    const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return false;
+    ctx=new AC();
+    master=ctx.createGain();master.gain.value=0;
+    // brick-wall-ish limiter so we can run hot without clipping
+    const comp=ctx.createDynamicsCompressor();
+    comp.threshold.value=-10;comp.knee.value=18;comp.ratio.value=12;
+    comp.attack.value=0.003;comp.release.value=0.25;
+    master.connect(comp);comp.connect(ctx.destination);
+    // ambient pad: detuned low oscillators through a slowly sweeping lowpass
+    padGain=ctx.createGain();padGain.gain.value=0.09;
+    const filt=ctx.createBiquadFilter();filt.type='lowpass';filt.frequency.value=360;filt.Q.value=7;
+    padGain.connect(filt);filt.connect(master);
+    [55,82.5,110].forEach(function(f,i){
+      const o=ctx.createOscillator();o.type=(i===2)?'triangle':'sawtooth';
+      o.frequency.value=f;o.detune.value=(i-1)*7;
+      const g=ctx.createGain();g.gain.value=(i===2)?0.22:0.45;
+      o.connect(g);g.connect(padGain);o.start();});
+    const lfo=ctx.createOscillator();lfo.frequency.value=0.05;
+    const lg=ctx.createGain();lg.gain.value=190;lfo.connect(lg);lg.connect(filt.frequency);lfo.start();
+    return true;
+  }
+  function enable(){if(!ctx&&!init())return;if(ctx.state==='suspended')ctx.resume();
+    enabled=true;master.gain.cancelScheduledValues(ctx.currentTime);
+    master.gain.linearRampToValueAtTime(1.6,ctx.currentTime+0.8);}
+  function disable(){if(!ctx)return;enabled=false;
+    master.gain.cancelScheduledValues(ctx.currentTime);
+    master.gain.linearRampToValueAtTime(0,ctx.currentTime+0.3);}
+  function zap(ev){
+    if(!enabled||!ctx)return;
+    const now=performance.now();bucket=Math.min(5,bucket+(now-lastT)/1000*5);lastT=now;
+    if(bucket<1)return;bucket-=1;
+    const rep=!!ev.replay;if(rep&&Math.random()<0.55)return;   // thin out replay clutter
+    const t0=ctx.currentTime,f0=TYPE_F[ev.type]||300;
+    const o=ctx.createOscillator();o.type='sine';
+    o.frequency.setValueAtTime(f0*3,t0);o.frequency.exponentialRampToValueAtTime(f0,t0+0.17);
+    const w=(ev.weight!==undefined)?ev.weight:0.6,vol=(rep?0.32:0.7)*(0.5+0.5*w);
+    const g=ctx.createGain();
+    g.gain.setValueAtTime(0.0001,t0);g.gain.exponentialRampToValueAtTime(vol,t0+0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+0.22);
+    o.connect(g);
+    const lon=(ev.src&&ev.src.lon)||0;
+    if(ctx.createStereoPanner){const p=ctx.createStereoPanner();
+      p.pan.value=Math.max(-1,Math.min(1,lon/180));g.connect(p);p.connect(master);}
+    else g.connect(master);
+    o.start(t0);o.stop(t0+0.24);
+  }
+  return {enable:enable,disable:disable,zap:zap,isOn:function(){return enabled;}};
+})();
+(function(){const b=document.getElementById('sound');if(!b)return;
+  b.addEventListener('click',function(){b.classList.remove('hint');
+    if(Sound.isOn()){Sound.disable();b.textContent='🔇';b.classList.remove('on');}
+    else{Sound.enable();b.textContent='🔊';b.classList.add('on');}});})();
+
+// ---- native bridge (called by the Kotlin side via evaluateJavascript) ----
+window.setWorld=function(geojson){try{world=(typeof geojson==='string')?JSON.parse(geojson):geojson;drawBase();}catch(e){}};
+window.setHome=function(lat,lon){HOME={lat:lat,lon:lon};drawBase();};
+let firstEvent=true;
+window.pushEvent=function(ev){try{
+  if(typeof ev==='string')ev=JSON.parse(ev);
+  if(firstEvent){firstEvent=false;const s=document.getElementById('status');if(s)s.style.display='none';}
+  addEvent(ev);
+}catch(e){}};
+window.setStatus=function(txt){const s=document.getElementById('status');if(s){s.textContent=txt;s.style.display=txt?'block':'none';}};
+
+resize();buildLegend();wireControls();loop();
+</script></body></html>

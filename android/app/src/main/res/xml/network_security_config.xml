@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTTPS-only. All threat feeds and the ipwho.is geolocation API are HTTPS;
+     cleartext is denied everywhere. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
