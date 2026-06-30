@@ -246,9 +246,9 @@ def _mmdb_decode(buf, off, base):
         if ss == 0:
             p = ((ctrl & 0x7) << 8) | buf[off]; off += 1
         elif ss == 1:
-            p = ((ctrl & 0x7) << 16) | (buf[off] << 8) | buf[off + 1] + 2048; off += 2
+            p = (((ctrl & 0x7) << 16) | (buf[off] << 8) | buf[off + 1]) + 2048; off += 2
         elif ss == 2:
-            p = ((ctrl & 0x7) << 24) | int.from_bytes(buf[off:off + 3], "big") + 526336; off += 3
+            p = (((ctrl & 0x7) << 24) | int.from_bytes(buf[off:off + 3], "big")) + 526336; off += 3
         else:
             p = int.from_bytes(buf[off:off + 4], "big"); off += 4
         val, _ = _mmdb_decode(buf, base + p, base)
