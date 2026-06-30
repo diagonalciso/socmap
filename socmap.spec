@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller one-file spec — builds a self-contained `attackmap` executable
+# PyInstaller one-file spec — builds a self-contained `socmap` executable
 # (no system Python needed). Cross-platform: same spec on Linux and Windows.
-#   pyinstaller attackmap.spec   ->   dist/attackmap (Linux)  /  dist/attackmap.exe (Windows)
+#   pyinstaller socmap.spec   ->   dist/socmap (Linux)  /  dist/socmap.exe (Windows)
 #
 # world.geojson is bundled as data and found at runtime via app._resource()
 # (sys._MEIPASS). geo.py / sources.py are picked up automatically as imports.
@@ -25,7 +25,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='attackmap',
+    name='socmap',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

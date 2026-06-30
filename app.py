@@ -272,14 +272,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, PAGE)
         elif path == "/healthz":
             self._json(200, {"ok": True, "total": _stats["total"]})
-        elif path == "/api/attackmap/world":
+        elif path == "/api/socmap/world":
             try:
                 with open(_WORLD, "rb") as f:
                     self._send(200, f.read(), "application/json",
                                {"Cache-Control": "max-age=86400"})
             except OSError:
                 self._json(404, {"error": "world map missing"})
-        elif path == "/api/attackmap/recent":
+        elif path == "/api/socmap/recent":
             limit = 200
             if "limit=" in self.path:
                 try:
@@ -289,10 +289,10 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 evs = list(_events)[-limit:]
             self._json(200, {"home": HOME, "events": evs})
-        elif path == "/api/attackmap/stats":
+        elif path == "/api/socmap/stats":
             with _lock:
                 self._json(200, dict(_stats))
-        elif path == "/api/attackmap/stream":
+        elif path == "/api/socmap/stream":
             self._stream()
         else:
             self._json(404, {"error": "not found"})
@@ -334,7 +334,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     start_workers()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"attackmap on http://{HOST}:{PORT}  "
+    print(f"socmap on http://{HOST}:{PORT}  "
           f"(home={HOME['lat']},{HOME['lon']} rate={EMIT_RATE}/s)", flush=True)
     try:
         srv.serve_forever()
@@ -571,12 +571,12 @@ const Sound=(function(){
 
 let synSeen=false;
 async function init(){resize();buildLegend();wireControls();loop();
-  try{world=await fetch('/api/attackmap/world').then(r=>r.json());drawBase();}catch(e){}
-  try{const h=await fetch('/api/attackmap/recent?limit=120').then(r=>r.json());
+  try{world=await fetch('/api/socmap/world').then(r=>r.json());drawBase();}catch(e){}
+  try{const h=await fetch('/api/socmap/recent?limit=120').then(r=>r.json());
     if(h.home){HOME=h.home;drawBase();}
     (h.events||[]).forEach(function(ev){addEvent(ev);if(ev.synthetic)synSeen=true;});renderPanels();}catch(e){}
   document.getElementById('synnote').textContent=synSeen?'Faded arcs = un-geolocatable IPs (synthetic placement).':'';
-  const es=new EventSource('/api/attackmap/stream');
+  const es=new EventSource('/api/socmap/stream');
   es.onmessage=function(e){try{const ev=JSON.parse(e.data);addEvent(ev);
     if(ev.synthetic&&!synSeen){synSeen=true;document.getElementById('synnote').textContent='Faded arcs = un-geolocatable IPs (synthetic placement).';}}catch(_){}};}
 init();

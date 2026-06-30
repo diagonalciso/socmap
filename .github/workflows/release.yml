@@ -20,11 +20,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset: attackmap-linux-x64
-            out: dist/attackmap
+            asset: socmap-linux-x64
+            out: dist/socmap
           - os: windows-latest
-            asset: attackmap-windows-x64.exe
-            out: dist/attackmap.exe
+            asset: socmap-windows-x64.exe
+            out: dist/socmap.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
         run: python -m pip install --upgrade pip pyinstaller
 
       - name: Build
-        run: pyinstaller attackmap.spec
+        run: pyinstaller socmap.spec
 
       - name: Stage artifact
         shell: bash

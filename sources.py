@@ -30,7 +30,7 @@ import os
 import urllib.request
 
 CONTACT = os.getenv("CONTACT_EMAIL", "admin@example.com")
-UA = f"attackmap/1.0 (+{CONTACT})"
+UA = f"socmap/1.0 (+{CONTACT})"
 TIMEOUT = float(os.getenv("FEED_TIMEOUT", "25"))
 
 # colour-bucket per feed (front-end TYPES keys: ddos ransomware malware

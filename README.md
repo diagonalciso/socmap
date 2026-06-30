@@ -1,4 +1,4 @@
-# Attack Map — live threat-feed cyber attack map
+# SOCmap — live threat-feed cyber attack map
 
 A standalone, Norse-style real-time attack map. Polls **free public threat
 feeds**, geolocates every malicious IP, and animates the hits as glowing arcs
@@ -22,25 +22,25 @@ Download from the [latest release](../../releases/latest):
 
 | Platform | File |
 |----------|------|
-| Windows  | `attackmap-windows-x64.exe` |
-| Linux    | `attackmap-linux-x64` |
+| Windows  | `socmap-windows-x64.exe` |
+| Linux    | `socmap-linux-x64` |
 
-**Windows:** double-click `attackmap-windows-x64.exe` (SmartScreen may warn on an
+**Windows:** double-click `socmap-windows-x64.exe` (SmartScreen may warn on an
 unsigned binary → *More info → Run anyway*). A console window opens; browse to
 **http://localhost:8100**.
 
 **Linux:**
 ```bash
-chmod +x attackmap-linux-x64
-./attackmap-linux-x64
+chmod +x socmap-linux-x64
+./socmap-linux-x64
 # -> open http://localhost:8100
 ```
 
 ### Option B — from source (Python 3.8+)
 
 ```bash
-git clone https://github.com/diagonalciso/attackmap
-cd attackmap
+git clone https://github.com/diagonalciso/socmap
+cd socmap
 cp .env.example .env          # optional — tweak home location, etc.
 ./run.sh                      # Windows: run.bat
 # -> http://localhost:8100
@@ -114,18 +114,18 @@ A dead or rate-limited feed never takes the map down (every fetch is wrapped).
 - **Zoom:** mouse wheel / `+` `−` buttons / pinch. **Pan:** drag. **Reset:** `□`.
 - `GET /` — the map UI
 - `GET /healthz` — `{ok, total}`
-- `GET /api/attackmap/stream` — Server-Sent Events live feed
-- `GET /api/attackmap/recent?limit=N` — recent events + home
-- `GET /api/attackmap/stats` — totals by source/type/country
-- `GET /api/attackmap/world` — bundled coastline GeoJSON
+- `GET /api/socmap/stream` — Server-Sent Events live feed
+- `GET /api/socmap/recent?limit=N` — recent events + home
+- `GET /api/socmap/stats` — totals by source/type/country
+- `GET /api/socmap/world` — bundled coastline GeoJSON
 
 ---
 
 ## Run as a service (Linux)
 
 ```bash
-sudo cp attackmap.service /etc/systemd/system/
-sudo systemctl enable --now attackmap
+sudo cp socmap.service /etc/systemd/system/
+sudo systemctl enable --now socmap
 ```
 Edit the unit's `WorkingDirectory`/`ExecStart` to match where you put the app.
 
@@ -133,13 +133,13 @@ Edit the unit's `WorkingDirectory`/`ExecStart` to match where you put the app.
 
 ## Build your own packages
 
-Self-contained executables are produced with **PyInstaller** from `attackmap.spec`:
+Self-contained executables are produced with **PyInstaller** from `socmap.spec`:
 
 ```bash
 pip install pyinstaller
-pyinstaller attackmap.spec
-# -> dist/attackmap         (Linux ELF)
-# -> dist/attackmap.exe     (when run on Windows)
+pyinstaller socmap.spec
+# -> dist/socmap         (Linux ELF)
+# -> dist/socmap.exe     (when run on Windows)
 ```
 
 A real **Windows .exe** can only be built on Windows. The bundled GitHub Actions
@@ -155,4 +155,4 @@ git tag v0.1 && git push origin v0.1     # -> CI builds + publishes both binarie
 ## See also
 
 Companion **standalone Android app** (on-device feeds + WebView map + the same
-audio): [`attackmap-android`](https://github.com/diagonalciso/attackmap-android).
+audio): [`socmap-android`](https://github.com/diagonalciso/socmap-android).
