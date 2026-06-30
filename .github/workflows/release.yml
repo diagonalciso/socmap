@@ -1,0 +1,59 @@
+name: build-release
+
+# Builds self-contained Linux + Windows executables with PyInstaller and
+# attaches them to a GitHub Release whenever a v* tag is pushed.
+#   git tag v0.1 && git push origin v0.1
+# Manual run (Actions tab -> Run workflow) just builds + uploads artifacts.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: attackmap-linux-x64
+            out: dist/attackmap
+          - os: windows-latest
+            asset: attackmap-windows-x64.exe
+            out: dist/attackmap.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Build
+        run: pyinstaller attackmap.spec
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "${{ matrix.out }}" "out/${{ matrix.asset }}"
+          cp .env.example out/.env.example
+          cp README.md out/README.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/*
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/${{ matrix.asset }}

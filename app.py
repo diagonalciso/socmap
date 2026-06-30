@@ -16,15 +16,54 @@ Run:  cp .env.example .env && env $(grep -v '^#' .env | xargs) python3 app.py
 import json
 import os
 import queue
+import random
 import socket
+import sys
 import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import geo
-import sources
+
+def _app_dir():
+    """Directory of the running app — the PyInstaller exe dir when frozen,
+    else this source file's dir. Used for .env and bundled data."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _resource(name):
+    """Path to a bundled data file (world.geojson, the mmdb): PyInstaller
+    unpacks data into sys._MEIPASS; fall back to the app dir / source dir."""
+    for base in (getattr(sys, "_MEIPASS", None), _app_dir()):
+        if base:
+            p = os.path.join(base, name)
+            if os.path.exists(p):
+                return p
+    return os.path.join(_app_dir(), name)
+
+
+def _load_dotenv():
+    """Load KEY=VALUE lines from a .env beside the app (no deps) so the
+    packaged binary is configurable without setting shell env vars."""
+    try:
+        with open(os.path.join(_app_dir(), ".env"), encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+    except OSError:
+        pass
+
+
+_load_dotenv()
+
+import geo        # noqa: E402  (after dotenv so GEOIP_MMDB is honoured)
+import sources    # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -38,6 +77,8 @@ RING = int(os.getenv("RING", "400"))                    # history kept for /rece
 FIRST_BURST = int(os.getenv("FIRST_BURST", "40"))       # arcs emitted on a feed's 1st poll
 SEEN_MAX = int(os.getenv("SEEN_MAX", "60000"))          # per-feed dedup memory cap
 DNS_CAP = int(os.getenv("DNS_CAP", "25"))               # urlhaus host lookups / cycle
+REPLAY_RATE = float(os.getenv("REPLAY_RATE", "1.6"))    # arcs/s replayed from pool (0 = off)
+POOL_MAX = int(os.getenv("POOL_MAX", "6000"))           # geolocated events kept for replay
 
 TYPE_COLOR = {
     "ddos": "#ff3860", "ransomware": "#ff4444", "malware": "#ff8c00",
@@ -49,6 +90,7 @@ TYPE_COLOR = {
 # Shared state
 # --------------------------------------------------------------------------- #
 _events = deque(maxlen=RING)          # recent emitted events (for initial paint)
+_pool = deque(maxlen=POOL_MAX)        # geolocated events available for replay trickle
 _subs = set()                         # set[queue.Queue] live SSE subscribers
 _emitq = queue.Queue(maxsize=5000)    # poller -> emitter backlog (rate-smoothed)
 _lock = threading.Lock()
@@ -97,6 +139,8 @@ def _make_event(raw):
 def _broadcast(ev):
     with _lock:
         _events.append(ev)
+        if not ev.get("replay"):
+            _pool.append(ev)
         _stats["total"] += 1
         for k, d in (("by_source", ev["source"]), ("by_type", ev["type"]),
                      ("by_country", ev["country"])):
@@ -165,8 +209,31 @@ def _poller(name, fetch, interval):
         time.sleep(interval)
 
 
+def _replayer():
+    """Re-emit known-bad IPs from the pool at a steady baseline so the map
+    never goes dead between (slow) feed refreshes. Same real malicious infra,
+    redrawn — flagged replay so the front-end can treat it lightly."""
+    if REPLAY_RATE <= 0:
+        return
+    interval = 1.0 / REPLAY_RATE
+    while True:
+        time.sleep(interval)
+        with _lock:
+            ev = random.choice(_pool) if _pool else None
+        if ev is None:
+            continue
+        clone = dict(ev)
+        clone["replay"] = True
+        clone["ts"] = _now_iso()
+        try:
+            _emitq.put_nowait(clone)
+        except queue.Full:
+            pass
+
+
 def start_workers():
     threading.Thread(target=_emitter, daemon=True, name="emitter").start()
+    threading.Thread(target=_replayer, daemon=True, name="replayer").start()
     for name, fetch, interval in sources.SOURCES:
         threading.Thread(target=_poller, args=(name, fetch, interval),
                          daemon=True, name=f"poll-{name}").start()
@@ -175,7 +242,7 @@ def start_workers():
 # --------------------------------------------------------------------------- #
 # HTTP / SSE
 # --------------------------------------------------------------------------- #
-_WORLD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "world.geojson")
+_WORLD = _resource("world.geojson")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -324,6 +391,12 @@ body{height:100vh;overflow:hidden;background:#05080f;color:var(--text);
   background:rgba(13,17,23,.8);color:var(--text);border:1px solid var(--border);border-radius:7px;
   backdrop-filter:blur(6px);transition:.15s;}
 #zoomctl button:hover{background:var(--surface2);border-color:var(--accent);color:var(--accent);}
+#sound{position:fixed;top:12px;right:12px;z-index:30;width:40px;height:40px;border-radius:50%;
+  background:rgba(13,17,23,.85);border:1px solid var(--border);color:var(--muted);font-size:18px;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;backdrop-filter:blur(6px);}
+#sound.on{color:var(--accent);border-color:var(--accent);}
+#sound.hint{animation:sh 1.3s ease-in-out infinite;border-color:var(--accent);color:var(--accent);}
+@keyframes sh{0%,100%{box-shadow:0 0 0 0 rgba(88,166,255,.55);}50%{box-shadow:0 0 0 9px rgba(88,166,255,0);}}
 </style></head><body>
 <canvas id="map"></canvas>
 <div id="title"><span class="live-dot"></span>ATTACK MAP <span style="color:var(--muted);font-weight:500;font-size:11px">live threat feeds</span></div>
@@ -340,6 +413,7 @@ body{height:100vh;overflow:hidden;background:#05080f;color:var(--text);
   <button id="zout" title="Zoom out">&minus;</button>
   <button id="zreset" title="Reset view">&#9633;</button>
 </div>
+<div id="sound" class="hint" title="sound on/off">🔇</div>
 <div id="legend"></div>
 <div id="note">Arcs = malicious IPs from public threat feeds (abuse.ch, DShield, blocklist.de, CINS), geolocated to an <b>approximate origin</b> — known-bad infrastructure, not live victim attribution. <span id="synnote"></span></div>
 <script>
@@ -386,7 +460,8 @@ function addEvent(ev){counts.total++;
   const ctrl=[(x0+x1)/2,(y0+y1)/2-lift],col=ev.color||TYPES[t]||TYPES.other;
   const w=ev.weight!==undefined?ev.weight:0.6;
   arcs.push({x0,y0,x1,y1,cx:ctrl[0],cy:ctrl[1],col,w,t:0,dur:900+dist*0.6,syn:ev.synthetic});
-  dots.push({x:x0,y:y0,col,t:0,syn:ev.synthetic,w});addTick(ev);}
+  dots.push({x:x0,y:y0,col,t:0,syn:ev.synthetic,w});addTick(ev);
+  try{Sound.zap(ev);}catch(e){}}
 function addTick(ev){const box=document.getElementById('ticks');const d=document.createElement('div');
   d.className='tick'+(ev.synthetic?' syn':'');
   d.innerHTML='<span class="ip">'+esc(ev.ip)+'</span><span class="cn">'+esc(ev.country||'')+(ev.synthetic?' ~':'')+
@@ -449,6 +524,51 @@ function wireControls(){
   document.getElementById('zin').onclick=function(){zoomAt(W/2,H/2,1.3);};
   document.getElementById('zout').onclick=function(){zoomAt(W/2,H/2,1/1.3);};
   document.getElementById('zreset').onclick=function(){view.zoom=1;view.panX=0;view.panY=0;};}
+// ---- audio: synthesized ambient drone + per-attack zaps (Web Audio) ------
+const Sound=(function(){
+  let ctx,master,padGain,enabled=false;
+  const TYPE_F={ddos:70,ransomware:90,malware:165,bruteforce:240,webattack:330,intrusion:200,recon:540,other:300};
+  let bucket=5,lastT=performance.now();
+  function init2(){
+    const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return false;
+    ctx=new AC();master=ctx.createGain();master.gain.value=0;
+    const comp=ctx.createDynamicsCompressor();
+    comp.threshold.value=-10;comp.knee.value=18;comp.ratio.value=12;comp.attack.value=0.003;comp.release.value=0.25;
+    master.connect(comp);comp.connect(ctx.destination);
+    padGain=ctx.createGain();padGain.gain.value=0.09;
+    const filt=ctx.createBiquadFilter();filt.type='lowpass';filt.frequency.value=360;filt.Q.value=7;
+    padGain.connect(filt);filt.connect(master);
+    [55,82.5,110].forEach(function(f,i){const o=ctx.createOscillator();o.type=(i===2)?'triangle':'sawtooth';
+      o.frequency.value=f;o.detune.value=(i-1)*7;const g=ctx.createGain();g.gain.value=(i===2)?0.22:0.45;
+      o.connect(g);g.connect(padGain);o.start();});
+    const lfo=ctx.createOscillator();lfo.frequency.value=0.05;const lg=ctx.createGain();lg.gain.value=190;
+    lfo.connect(lg);lg.connect(filt.frequency);lfo.start();return true;}
+  function enable(){if(!ctx&&!init2())return;if(ctx.state==='suspended')ctx.resume();
+    enabled=true;master.gain.cancelScheduledValues(ctx.currentTime);
+    master.gain.linearRampToValueAtTime(1.6,ctx.currentTime+0.8);}
+  function disable(){if(!ctx)return;enabled=false;master.gain.cancelScheduledValues(ctx.currentTime);
+    master.gain.linearRampToValueAtTime(0,ctx.currentTime+0.3);}
+  function zap(ev){if(!enabled||!ctx)return;
+    const now=performance.now();bucket=Math.min(5,bucket+(now-lastT)/1000*5);lastT=now;
+    if(bucket<1)return;bucket-=1;
+    const rep=!!ev.replay;if(rep&&Math.random()<0.55)return;
+    const t0=ctx.currentTime,f0=TYPE_F[ev.type]||300;
+    const o=ctx.createOscillator();o.type='sine';
+    o.frequency.setValueAtTime(f0*3,t0);o.frequency.exponentialRampToValueAtTime(f0,t0+0.17);
+    const w=(ev.weight!==undefined)?ev.weight:0.6,vol=(rep?0.32:0.7)*(0.5+0.5*w);
+    const g=ctx.createGain();g.gain.setValueAtTime(0.0001,t0);
+    g.gain.exponentialRampToValueAtTime(vol,t0+0.008);g.gain.exponentialRampToValueAtTime(0.0001,t0+0.22);
+    o.connect(g);const lon=(ev.src&&ev.src.lon)||0;
+    if(ctx.createStereoPanner){const p=ctx.createStereoPanner();p.pan.value=Math.max(-1,Math.min(1,lon/180));
+      g.connect(p);p.connect(master);}else g.connect(master);
+    o.start(t0);o.stop(t0+0.24);}
+  return {enable:enable,disable:disable,zap:zap,isOn:function(){return enabled;}};
+})();
+(function(){const b=document.getElementById('sound');if(!b)return;
+  b.addEventListener('click',function(){b.classList.remove('hint');
+    if(Sound.isOn()){Sound.disable();b.textContent='🔇';b.classList.remove('on');}
+    else{Sound.enable();b.textContent='🔊';b.classList.add('on');}});})();
+
 let synSeen=false;
 async function init(){resize();buildLegend();wireControls();loop();
   try{world=await fetch('/api/attackmap/world').then(r=>r.json());drawBase();}catch(e){}

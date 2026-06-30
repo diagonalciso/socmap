@@ -201,14 +201,93 @@ def fetch_cins():
             for ip in _iter_text_ips(blob)]
 
 
+# --------------------------------------------------------------------------- #
+# Extra plaintext blocklists — bigger pool so the map stays busy
+# --------------------------------------------------------------------------- #
+def fetch_greensnow():
+    try:
+        blob = _text("https://blocklist.greensnow.co/greensnow.txt")
+    except Exception:
+        return []
+    return [{"ip": ip, "type": "bruteforce", "source": "greensnow",
+             "label": "GreenSnow attacker", "country": None, "weight": 0.6}
+            for ip in _iter_text_ips(blob)]
+
+
+def fetch_et_compromised():
+    try:
+        blob = _text("https://rules.emergingthreats.net/blockrules/compromised-ips.txt")
+    except Exception:
+        return []
+    return [{"ip": ip, "type": "intrusion", "source": "et-compromised",
+             "label": "ET compromised host", "country": None, "weight": 0.7}
+            for ip in _iter_text_ips(blob)]
+
+
+def fetch_blocklist_ssh():
+    try:
+        blob = _text("https://lists.blocklist.de/lists/ssh.txt")
+    except Exception:
+        return []
+    return [{"ip": ip, "type": "bruteforce", "source": "blocklist.de-ssh",
+             "label": "SSH brute-forcer", "country": None, "weight": 0.6}
+            for ip in _iter_text_ips(blob)]
+
+
+# --------------------------------------------------------------------------- #
+# DataPlane.org — real sensor/honeypot-derived attacker IPs (no auth).
+# Pipe-delimited:  ASN | ASname | IP | lastseen | category
+# --------------------------------------------------------------------------- #
+def _iter_dataplane_ips(blob):
+    for line in blob.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        cols = line.split("|")
+        if len(cols) < 3:
+            continue
+        ip = cols[2].strip()
+        if _is_ip(ip):
+            yield ip
+
+
+def _dataplane(url, source, typ, label, weight):
+    def _fetch():
+        try:
+            blob = _text(url)
+        except Exception:
+            return []
+        return [{"ip": ip, "type": typ, "source": source,
+                 "label": label, "country": None, "weight": weight}
+                for ip in _iter_dataplane_ips(blob)]
+    return _fetch
+
+
+fetch_dp_ssh = _dataplane("https://dataplane.org/sshpwauth.txt",
+                          "dataplane-ssh", "bruteforce", "honeypot SSH auth", 0.7)
+fetch_dp_telnet = _dataplane("https://dataplane.org/telnetlogin.txt",
+                             "dataplane-telnet", "bruteforce", "honeypot telnet (IoT)", 0.7)
+fetch_dp_vnc = _dataplane("https://dataplane.org/vncrfb.txt",
+                          "dataplane-vnc", "intrusion", "honeypot VNC probe", 0.7)
+fetch_dp_sip = _dataplane("https://dataplane.org/sipquery.txt",
+                          "dataplane-sip", "recon", "honeypot SIP scan", 0.6)
+
+
 # Registry: (name, fetch_fn, poll_interval_seconds). Intervals respect each
 # feed's own refresh cadence — abuse.ch regenerates URLhaus every ~5 min; the
 # blocklists move slower. Don't hammer; you'll get blocked.
 SOURCES = [
-    ("feodo",        fetch_feodo,     30 * 60),
-    ("threatfox",    fetch_threatfox,  5 * 60),
-    ("urlhaus",      fetch_urlhaus,    5 * 60),
-    ("dshield",      fetch_dshield,   60 * 60),
-    ("blocklist.de", fetch_blocklist, 30 * 60),
-    ("cins",         fetch_cins,      60 * 60),
+    ("feodo",            fetch_feodo,         30 * 60),
+    ("threatfox",        fetch_threatfox,      5 * 60),
+    ("urlhaus",          fetch_urlhaus,        5 * 60),
+    ("dshield",          fetch_dshield,       60 * 60),
+    ("blocklist.de",     fetch_blocklist,     30 * 60),
+    ("cins",             fetch_cins,          60 * 60),
+    ("greensnow",        fetch_greensnow,     30 * 60),
+    ("et-compromised",   fetch_et_compromised, 60 * 60),
+    ("blocklist.de-ssh", fetch_blocklist_ssh, 30 * 60),
+    ("dataplane-ssh",    fetch_dp_ssh,        60 * 60),
+    ("dataplane-telnet", fetch_dp_telnet,     60 * 60),
+    ("dataplane-vnc",    fetch_dp_vnc,        60 * 60),
+    ("dataplane-sip",    fetch_dp_sip,        60 * 60),
 ]
