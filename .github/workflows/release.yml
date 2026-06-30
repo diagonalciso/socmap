@@ -1,7 +1,8 @@
 name: build-release
 
-# Builds self-contained Linux + Windows executables with PyInstaller and
-# attaches them to a GitHub Release whenever a v* tag is pushed.
+# Builds self-contained Linux + Windows executables (PyInstaller) and the
+# Android debug APK (Gradle), and attaches all three to a GitHub Release
+# whenever a v* tag is pushed.
 #   git tag v0.1 && git push origin v0.1
 # Manual run (Actions tab -> Run workflow) just builds + uploads artifacts.
 
@@ -57,3 +58,35 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: out/${{ matrix.asset }}
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew :app:assembleDebug
+
+      - name: Stage APK
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk out/socmap-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: socmap-android.apk
+          path: out/socmap-android.apk
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/socmap-android.apk
