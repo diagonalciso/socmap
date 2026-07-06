@@ -348,7 +348,7 @@ def main():
 PAGE = r"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Attack Map — Live Threat Feeds</title>
+<title>soc-threatmap — Live Threat Feeds</title>
 <style>
 :root{--border:#222c38;--muted:#7d8590;--text:#c9d1d9;--accent:#58a6ff;--surface2:#161b22;}
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -399,7 +399,7 @@ body{height:100vh;overflow:hidden;background:#05080f;color:var(--text);
 @keyframes sh{0%,100%{box-shadow:0 0 0 0 rgba(88,166,255,.55);}50%{box-shadow:0 0 0 9px rgba(88,166,255,0);}}
 </style></head><body>
 <canvas id="map"></canvas>
-<div id="title"><span class="live-dot"></span>ATTACK MAP <span style="color:var(--muted);font-weight:500;font-size:11px">live threat feeds</span></div>
+<div id="title"><span class="live-dot"></span>SOC-THREATMAP <span style="color:var(--muted);font-weight:500;font-size:11px">live threat feeds</span></div>
 <div class="panel" id="stats">
   <div class="big"><span id="total">0</span> <small>events</small></div>
   <div class="big" style="font-size:16px;margin-top:6px;"><span id="rate">0</span> <small>/min</small></div>
