@@ -350,7 +350,7 @@ def main():
 PAGE = r"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Soc-Threatmap — Live Threat Feeds</title>
+<title>SOC Threatmap — Live Threat Feeds</title>
 <style>
 :root{--border:#222c38;--muted:#7d8590;--text:#c9d1d9;--accent:#58a6ff;--surface2:#161b22;}
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -401,7 +401,7 @@ body{height:100vh;overflow:hidden;background:#05080f;color:var(--text);
 @keyframes sh{0%,100%{box-shadow:0 0 0 0 rgba(88,166,255,.55);}50%{box-shadow:0 0 0 9px rgba(88,166,255,0);}}
 </style></head><body><a href="/manual" target="_blank" title="Manual / Help" style="position:fixed;top:12px;right:14px;z-index:99999;width:30px;height:30px;border-radius:50%;background:#161b22;border:1px solid #30363d;color:#58a6ff;font:700 16px/30px system-ui,sans-serif;text-align:center;text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.4)" onmouseover="this.style.borderColor='#58a6ff'" onmouseout="this.style.borderColor='#30363d'">?</a>
 <canvas id="map"></canvas>
-<div id="title"><span class="live-dot"></span>Soc-Threatmap <span style="color:var(--muted);font-weight:500;font-size:11px">live threat feeds</span></div>
+<div id="title"><span class="live-dot"></span>SOC Threatmap <span style="color:var(--muted);font-weight:500;font-size:11px">live threat feeds</span></div>
 <div class="panel" id="stats">
   <div class="big"><span id="total">0</span> <small>events</small></div>
   <div class="big" style="font-size:16px;margin-top:6px;"><span id="rate">0</span> <small>/min</small></div>
