@@ -14,8 +14,10 @@ REQUIRED_KEYS = {"lat", "lon", "country", "cc", "synthetic"}
 
 # ── routable guard ────────────────────────────────────────────────────────────
 
+# RFC5737 TEST-NET deliberately does *not* belong here: the map treats it as
+# mappable so socops' synthetic feeds render. See the two tests below.
 @pytest.mark.parametrize("ip", [
-    "192.0.2.1", "10.0.0.5", "127.0.0.1", "0.0.0.0",
+    "192.168.100.5", "172.16.0.1", "10.0.0.5", "127.0.0.1", "0.0.0.0",
     "169.254.1.1", "::1", "", "not-an-ip",
 ])
 def test_non_routable_returns_none(ip):
