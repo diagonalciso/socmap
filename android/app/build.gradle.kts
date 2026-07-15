@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "eu.cisodiagonal.socmap"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "eu.cisodiagonal.socmap"
